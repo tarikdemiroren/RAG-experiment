@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -12,6 +13,8 @@ SYSTEM_PROMPT = """You answer questions about recipes using only the numbered co
 - Be concise."""
 
 NO_MATCH = "No relevant recipes found."
+
+_CITATION = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
 
 def relevant(hits: list[Hit], max_distance: float) -> list[Hit]:
@@ -35,3 +38,9 @@ def stream_answer(client: Any, model: str, question: str, hits: list[Hit]) -> It
         options={"temperature": 0.1},
     ):
         yield part.message.content
+
+
+def cited(answer: str, hits: list[Hit]) -> list[tuple[int, Hit]]:
+    """The hits referenced as [n] or [n, m] in ``answer``, in order, without duplicates."""
+    numbers = {int(n) for group in _CITATION.findall(answer) for n in group.split(",")}
+    return [(n, hits[n - 1]) for n in sorted(numbers) if 1 <= n <= len(hits)]

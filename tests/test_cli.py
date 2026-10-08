@@ -135,9 +135,7 @@ def test_ask_answers_with_sources(pipeline, capsys, monkeypatch):
     assert cli.main(["ask", "how do I fry pancakes"]) == 0
 
     out = capsys.readouterr().out
-    assert out.startswith("Fry them [1].")
-    assert "Sources:\n[1] Pancake (recipes/Pancake, distance" in out
-    assert "Hummus" not in out
+    assert out == "Fry them [1]. \n\nSources:\n[1] Pancake\n"
     assert "Fry pancakes in butter." in client.chats[0]["messages"][1]["content"]
 
 
@@ -154,3 +152,30 @@ def test_ask_without_relevant_chunks_skips_llm(pipeline, capsys, monkeypatch):
     assert "--- [1]" in out
     assert out.rstrip().endswith("No relevant recipes found.")
     assert client.chats == []
+
+
+def test_ask_lists_only_cited_sources(pipeline, capsys, monkeypatch):
+    client = FakeOllamaClient(reply="Blend them [2].")
+    monkeypatch.setattr("ollama.Client", lambda host: client)
+    os.environ["RAG_MAX_DISTANCE"] = "2.0"
+    cli.main(["ingest"])
+    capsys.readouterr()
+
+    cli.main(["ask", "how do I fry pancakes"])
+
+    out = capsys.readouterr().out
+    assert out.endswith("Sources:\n[2] Hummus\n")
+    assert "Pancake" not in out
+    assert "distance" not in out
+
+
+def test_ask_without_citations_prints_no_sources(pipeline, capsys, monkeypatch):
+    client = FakeOllamaClient(reply="I don't know.")
+    monkeypatch.setattr("ollama.Client", lambda host: client)
+    os.environ["RAG_MAX_DISTANCE"] = "2.0"
+    cli.main(["ingest"])
+    capsys.readouterr()
+
+    cli.main(["ask", "calories?"])
+
+    assert capsys.readouterr().out == "I don't know. \n"

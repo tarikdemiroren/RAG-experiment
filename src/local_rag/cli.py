@@ -9,7 +9,7 @@ import ollama
 from dotenv import load_dotenv
 
 from local_rag import __version__
-from local_rag.answer import NO_MATCH, relevant, stream_answer
+from local_rag.answer import NO_MATCH, cited, relevant, stream_answer
 from local_rag.checks import run_checks
 from local_rag.chunking import chunk_recipe
 from local_rag.config import ConfigError, Settings, apply_env_defaults
@@ -114,11 +114,16 @@ def _cmd_ask(settings: Settings, question: str, show_context: bool) -> int:
         return 0
 
     client = ollama.Client(host=settings.ollama_host)
+    parts = []
     for token in stream_answer(client, settings.llm_model, question, hits):
+        parts.append(token)
         print(token, end="", flush=True)
-    print("\n\nSources:")
-    for i, hit in enumerate(hits, 1):
-        print(f"[{i}] {hit.title} ({hit.source}, distance {hit.distance:.3f})")
+    print()
+    sources = cited("".join(parts), hits)
+    if sources:
+        print("\nSources:")
+        for n, hit in sources:
+            print(f"[{n}] {hit.title}")
     return 0
 
 
