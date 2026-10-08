@@ -1,0 +1,10 @@
+[server]
+address = "127.0.0.1"
+headless = true
+maxUploadSize = 25
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

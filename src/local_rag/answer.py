@@ -15,6 +15,8 @@ SYSTEM_PROMPT = """You answer questions about recipes using only the numbered co
 NO_MATCH = "No relevant recipes found."
 
 _CITATION = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+_IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 
 def build_messages(question: str, hits: list[Hit]) -> list[dict[str, str]]:
@@ -40,3 +42,8 @@ def cited(answer: str, hits: list[Hit]) -> list[tuple[int, Hit]]:
     """The hits referenced as [n] or [n, m] in ``answer``, in order, without duplicates."""
     numbers = {int(n) for group in _CITATION.findall(answer) for n in group.split(",")}
     return [(n, hits[n - 1]) for n in sorted(numbers) if 1 <= n <= len(hits)]
+
+
+def safe_markdown(text: str) -> str:
+    """Remove markdown images and link targets, so rendering model output never loads a URL."""
+    return _LINK.sub(r"\1", _IMAGE.sub(r"\1", text))

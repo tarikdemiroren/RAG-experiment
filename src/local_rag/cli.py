@@ -1,35 +1,29 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 import ollama
-from dotenv import load_dotenv
 
-from local_rag import __version__
+from local_rag import __version__, pipeline
 from local_rag.answer import NO_MATCH, cited, stream_answer
 from local_rag.checks import run_checks
-from local_rag.chunking import chunk_recipe
-from local_rag.config import ConfigError, Settings, apply_env_defaults
-from local_rag.embeddings import Embedder, SentenceTransformerEmbedder
-from local_rag.loaders import load_recipes
-from local_rag.retrieval import MODES, Retriever
-from local_rag.store import Hit, IndexMissingError, VectorStore
+from local_rag.config import ConfigError, Settings, load_settings
+from local_rag.loaders import MAX_FILE_BYTES
+from local_rag.pipeline import NothingToIngestError
+from local_rag.retrieval import MODES
+from local_rag.store import Hit, IndexMissingError
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    env_file = Path.cwd() / ".env"
-    if env_file.is_file():
-        load_dotenv(env_file, override=False)
-    apply_env_defaults()
-
     try:
-        settings = Settings.from_env()
+        settings = load_settings()
     except ConfigError as exc:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
@@ -39,10 +33,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cmd_check(settings)
         if args.command == "ingest":
             return _cmd_ingest(settings)
+        if args.command == "ui":
+            return _cmd_ui()
         if args.command == "search":
             return _cmd_search(settings, args.query, args.mode)
         return _cmd_ask(settings, args.question, args.mode, args.show_context)
-    except IndexMissingError as exc:
+    except (IndexMissingError, NothingToIngestError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -55,6 +51,7 @@ def _build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check", help="verify Python, the resources folder and Ollama")
     commands.add_parser("ingest", help="rebuild the index from the resources folder")
+    commands.add_parser("ui", help="start the web UI on http://127.0.0.1:8501")
     search = commands.add_parser("search", help="show the chunks retrieved for a query")
     search.add_argument("query")
     ask = commands.add_parser("ask", help="answer a question from the indexed documents")
@@ -74,40 +71,48 @@ def _cmd_check(settings: Settings) -> int:
 
 
 def _cmd_ingest(settings: Settings) -> int:
-    report = load_recipes(settings.resources_dir)
-    for path, reason in report.skipped:
+    embedder = pipeline.make_embedder(settings)
+    result = pipeline.ingest(settings, embedder, pipeline.make_store(settings))
+    for path, reason in result.skipped:
         print(f"skipped {path}: {reason}")
-    chunks = [
-        chunk
-        for recipe in report.recipes
-        for chunk in chunk_recipe(recipe, settings.chunk_size, settings.chunk_overlap)
-    ]
-    if not chunks:
-        print(f"error: no documents with text under {settings.resources_dir}", file=sys.stderr)
-        return 1
-
-    embedder = make_embedder(settings)
-    for chunk in chunks:
-        tokens = embedder.count_tokens(chunk.text)
-        if tokens > embedder.max_tokens:
-            print(
-                f"warning: {chunk.id} has {tokens} tokens; only the first "
-                f"{embedder.max_tokens} are embedded"
-            )
-    vectors = embedder.embed([c.text for c in chunks])
-    make_store(settings).rebuild(chunks, vectors)
-    print(f"indexed {len(chunks)} chunks from {len(report.recipes)} recipes")
+    for chunk_id, tokens in result.truncated:
+        print(
+            f"warning: {chunk_id} has {tokens} tokens; only the first "
+            f"{embedder.max_tokens} are embedded"
+        )
+    print(f"indexed {result.chunks} chunks from {result.recipes} recipes")
     return 0
 
 
+def _cmd_ui() -> int:
+    script = Path(__file__).with_name("ui.py")
+    command = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(script),
+        "--server.address=127.0.0.1",
+        "--server.headless=true",
+        "--browser.gatherUsageStats=false",
+        "--client.toolbarMode=minimal",
+        f"--server.maxUploadSize={MAX_FILE_BYTES // 2**20}",
+    ]
+    try:
+        return subprocess.call(command)  # noqa: S603
+    except KeyboardInterrupt:
+        return 0
+
+
 def _cmd_search(settings: Settings, query: str, mode: str) -> int:
-    for i, hit in enumerate(make_retriever(settings).search(query, settings.top_k, mode), 1):
+    retriever = pipeline.make_retriever(settings)
+    for i, hit in enumerate(retriever.search(query, settings.top_k, mode), 1):
         _print_hit(i, hit)
     return 0
 
 
 def _cmd_ask(settings: Settings, question: str, mode: str, show_context: bool) -> int:
-    hits = make_retriever(settings).search(
+    hits = pipeline.make_retriever(settings).search(
         question, settings.top_k, mode, max_distance=settings.max_distance
     )
     if not hits:
@@ -138,15 +143,3 @@ def _print_hit(i: int, hit: Hit) -> None:
         f"({hit.keyword_coverage:.0%} of terms)  fused={hit.score:.4f}"
     )
     print(hit.text, end="\n\n")
-
-
-def make_embedder(settings: Settings) -> Embedder:
-    return SentenceTransformerEmbedder(settings.embedding_model)
-
-
-def make_store(settings: Settings) -> VectorStore:
-    return VectorStore(settings.db_dir, settings.collection)
-
-
-def make_retriever(settings: Settings) -> Retriever:
-    return Retriever(make_store(settings), make_embedder(settings))

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from typing import Protocol
+from functools import cached_property
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 
 class Embedder(Protocol):
-    max_tokens: int
+    @property
+    def max_tokens(self) -> int: ...
 
     def embed(self, texts: list[str]) -> list[list[float]]: ...
 
@@ -12,15 +17,24 @@ class Embedder(Protocol):
 
 
 class SentenceTransformerEmbedder:
+    """Loads the model on first use."""
+
     def __init__(self, model_name: str):
+        self.model_name = model_name
+
+    @cached_property
+    def _model(self) -> SentenceTransformer:
         from sentence_transformers import SentenceTransformer
 
         try:
             # Use the cached copy without contacting Hugging Face; download only on first run.
-            self._model = SentenceTransformer(model_name, local_files_only=True)
+            return SentenceTransformer(self.model_name, local_files_only=True)
         except OSError:
-            self._model = SentenceTransformer(model_name)
-        self.max_tokens: int = self._model.max_seq_length
+            return SentenceTransformer(self.model_name)
+
+    @property
+    def max_tokens(self) -> int:
+        return self._model.max_seq_length
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return self._model.encode(texts, normalize_embeddings=True).tolist()

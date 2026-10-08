@@ -4,6 +4,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import BinaryIO
 
 from docx import Document
 
@@ -65,8 +66,8 @@ def load_recipes(root: Path) -> LoadReport:
     return report
 
 
-def read_docx(path: Path) -> str:
-    doc = Document(str(path))
+def read_docx(source: Path | BinaryIO) -> str:
+    doc = Document(str(source) if isinstance(source, Path) else source)
     lines = [p.text for p in doc.paragraphs]
     for table in doc.tables:
         for row in table.rows:

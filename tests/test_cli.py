@@ -82,7 +82,7 @@ def pipeline(isolated_env, make_docx, monkeypatch, fake_ollama):
     from conftest import FakeEmbedder
 
     embedder = FakeEmbedder()
-    monkeypatch.setattr(cli, "make_embedder", lambda settings: embedder)
+    monkeypatch.setattr("local_rag.pipeline.make_embedder", lambda settings: embedder)
     recipes = isolated_env / "resources" / "recipes"
     make_docx(recipes / "Pancake" / "Ingredients.docx", "flour milk egg")
     make_docx(recipes / "Pancake" / "Recipe.docx", "Fry pancakes in butter.")
@@ -211,3 +211,15 @@ def test_search_modes(pipeline, capsys, mode, count):
     out = capsys.readouterr().out
     assert out.startswith("--- [1] Hummus")
     assert out.count("--- [") == count
+
+
+def test_ui_starts_streamlit_on_localhost(isolated_env, monkeypatch):
+    calls = []
+    monkeypatch.setattr("subprocess.call", lambda command: calls.append(command) or 0)
+    assert cli.main(["ui"]) == 0
+    (command,) = calls
+    assert command[1:4] == ["-m", "streamlit", "run"]
+    assert command[4].endswith("local_rag/ui.py")
+    assert "--server.address=127.0.0.1" in command
+    assert "--browser.gatherUsageStats=false" in command
+    assert "--server.maxUploadSize=25" in command

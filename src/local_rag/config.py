@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from dotenv import load_dotenv
+
 DEFAULTS: dict[str, str] = {
     "RAG_RESOURCES_DIR": "resources",
     "RAG_DB_DIR": "chroma_db",
@@ -88,6 +90,15 @@ class Settings:
             top_k=_parse_int("RAG_TOP_K", get("RAG_TOP_K"), minimum=1, maximum=50),
             max_distance=_parse_float("RAG_MAX_DISTANCE", get("RAG_MAX_DISTANCE"), 0.0, 2.0),
         )
+
+
+def load_settings() -> Settings:
+    """Settings from the environment and the .env in the current directory."""
+    env_file = Path.cwd() / ".env"
+    if env_file.is_file():
+        load_dotenv(env_file, override=False)
+    apply_env_defaults()
+    return Settings.from_env()
 
 
 def validate_ollama_host(url: str, *, allow_remote: bool = False) -> str:
