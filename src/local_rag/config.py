@@ -16,15 +16,19 @@ DEFAULTS: dict[str, str] = {
     "RAG_LLM_MODEL": "llama3.2:3b",
     "RAG_OLLAMA_HOST": "http://127.0.0.1:11434",
     "RAG_ALLOW_REMOTE_OLLAMA": "false",
-    "RAG_CHUNK_SIZE": "900",
-    "RAG_CHUNK_OVERLAP": "150",
+    "RAG_CHUNK_SIZE": "700",
+    "RAG_CHUNK_OVERLAP": "100",
     "RAG_TOP_K": "4",
+    "RAG_MAX_DISTANCE": "0.6",
 }
 
-PRIVACY_ENV: dict[str, str] = {
+ENV_DEFAULTS: dict[str, str] = {
     "ANONYMIZED_TELEMETRY": "False",  # Chroma
-    "HF_HUB_DISABLE_TELEMETRY": "1",  # Hugging Face Hub
+    "HF_HUB_DISABLE_TELEMETRY": "1",
     "DO_NOT_TRACK": "1",
+    "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+    "TRANSFORMERS_VERBOSITY": "error",
+    "TOKENIZERS_PARALLELISM": "false",
 }
 
 _COLLECTION_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,61}[a-zA-Z0-9]$")
@@ -48,6 +52,7 @@ class Settings:
     chunk_size: int
     chunk_overlap: int
     top_k: int
+    max_distance: float
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -81,6 +86,7 @@ class Settings:
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             top_k=_parse_int("RAG_TOP_K", get("RAG_TOP_K"), minimum=1, maximum=50),
+            max_distance=_parse_float("RAG_MAX_DISTANCE", get("RAG_MAX_DISTANCE"), 0.0, 2.0),
         )
 
 
@@ -98,9 +104,9 @@ def validate_ollama_host(url: str, *, allow_remote: bool = False) -> str:
     return url.rstrip("/")
 
 
-def apply_privacy_defaults(env: MutableMapping[str, str] | None = None) -> None:
+def apply_env_defaults(env: MutableMapping[str, str] | None = None) -> None:
     target = os.environ if env is None else env
-    for key, value in PRIVACY_ENV.items():
+    for key, value in ENV_DEFAULTS.items():
         target.setdefault(key, value)
 
 
@@ -130,4 +136,14 @@ def _parse_int(key: str, raw: str, *, minimum: int, maximum: int | None = None) 
     if value < minimum or (maximum is not None and value > maximum):
         bounds = f">= {minimum}" if maximum is None else f"between {minimum} and {maximum}"
         raise ConfigError(f"{key} must be {bounds}, got {value}")
+    return value
+
+
+def _parse_float(key: str, raw: str, minimum: float, maximum: float) -> float:
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ConfigError(f"{key} must be a number, got {raw!r}") from None
+    if not minimum <= value <= maximum:
+        raise ConfigError(f"{key} must be between {minimum} and {maximum}, got {value}")
     return value

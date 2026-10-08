@@ -4,10 +4,10 @@ import pytest
 
 from local_rag.config import (
     DEFAULTS,
-    PRIVACY_ENV,
+    ENV_DEFAULTS,
     ConfigError,
     Settings,
-    apply_privacy_defaults,
+    apply_env_defaults,
     validate_ollama_host,
 )
 
@@ -21,7 +21,8 @@ def test_defaults():
     assert s.llm_model == "llama3.2:3b"
     assert s.ollama_host == "http://127.0.0.1:11434"
     assert s.allow_remote_ollama is False
-    assert (s.chunk_size, s.chunk_overlap, s.top_k) == (900, 150, 4)
+    assert (s.chunk_size, s.chunk_overlap, s.top_k) == (700, 100, 4)
+    assert s.max_distance == 0.6
 
 
 def test_env_overrides_defaults():
@@ -33,12 +34,14 @@ def test_env_overrides_defaults():
             "RAG_CHUNK_SIZE": "500",
             "RAG_CHUNK_OVERLAP": "0",
             "RAG_TOP_K": "8",
+            "RAG_MAX_DISTANCE": "0.45",
         }
     )
     assert s.resources_dir == Path("/data/docs")
     assert s.collection == "my-docs"
     assert s.llm_model == "llama3.2:1b"
     assert (s.chunk_size, s.chunk_overlap, s.top_k) == (500, 0, 8)
+    assert s.max_distance == 0.45
 
 
 def test_blank_values_fall_back_to_defaults():
@@ -61,6 +64,8 @@ def test_home_is_expanded():
         ({"RAG_CHUNK_SIZE": "200", "RAG_CHUNK_OVERLAP": "200"}, "smaller than"),
         ({"RAG_TOP_K": "0"}, "between 1 and 50"),
         ({"RAG_TOP_K": "51"}, "between 1 and 50"),
+        ({"RAG_MAX_DISTANCE": "far"}, "must be a number"),
+        ({"RAG_MAX_DISTANCE": "2.5"}, "between 0.0 and 2.0"),
         ({"RAG_ALLOW_REMOTE_OLLAMA": "maybe"}, "true or false"),
         ({"RAG_COLLECTION": "ab"}, "RAG_COLLECTION"),
         ({"RAG_COLLECTION": "-recipes"}, "RAG_COLLECTION"),
@@ -123,15 +128,15 @@ def test_credentials_in_url_are_rejected():
         validate_ollama_host("http://user:secret@localhost:11434")
 
 
-def test_privacy_defaults_are_set():
+def test_env_defaults_are_set():
     env = {}
-    apply_privacy_defaults(env)
-    assert env == PRIVACY_ENV
+    apply_env_defaults(env)
+    assert env == ENV_DEFAULTS
     assert env["ANONYMIZED_TELEMETRY"] == "False"
 
 
-def test_privacy_defaults_do_not_override_user_choice():
+def test_env_defaults_do_not_override_user_choice():
     env = {"ANONYMIZED_TELEMETRY": "True"}
-    apply_privacy_defaults(env)
+    apply_env_defaults(env)
     assert env["ANONYMIZED_TELEMETRY"] == "True"
     assert env["HF_HUB_DISABLE_TELEMETRY"] == "1"

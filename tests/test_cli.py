@@ -65,7 +65,7 @@ def test_config_error_exits_2(isolated_env, fake_ollama, capsys):
     assert fake_ollama["hosts"] == []
 
 
-def test_privacy_env_applied(isolated_env, fake_ollama):
+def test_env_defaults_applied(isolated_env, fake_ollama):
     os.environ.pop("ANONYMIZED_TELEMETRY", None)
     cli.main(["check"])
     assert os.environ["ANONYMIZED_TELEMETRY"] == "False"
@@ -75,3 +75,82 @@ def test_command_required(isolated_env):
     with pytest.raises(SystemExit) as exc:
         cli.main([])
     assert exc.value.code == 2
+
+
+@pytest.fixture
+def pipeline(isolated_env, make_docx, monkeypatch, fake_ollama):
+    from conftest import FakeEmbedder
+
+    embedder = FakeEmbedder()
+    monkeypatch.setattr(cli, "make_embedder", lambda settings: embedder)
+    recipes = isolated_env / "resources" / "recipes"
+    make_docx(recipes / "Pancake" / "Ingredients.docx", "flour milk egg")
+    make_docx(recipes / "Pancake" / "Recipe.docx", "Fry pancakes in butter.")
+    make_docx(recipes / "Pancake" / "Photo.docx")
+    make_docx(recipes / "Hummus" / "Recipe.docx", "Blend chickpeas with lemon and garlic.")
+    (recipes / "Empty").mkdir()
+    return embedder
+
+
+def test_ingest(pipeline, capsys):
+    assert cli.main(["ingest"]) == 0
+    out = capsys.readouterr().out
+    assert "skipped recipes/Pancake/Photo.docx: no text" in out
+    assert "indexed 2 chunks from 2 recipes" in out
+
+
+def test_ingest_warns_about_truncation(pipeline, capsys):
+    pipeline.max_tokens = 3
+    cli.main(["ingest"])
+    assert "warning: recipes/Hummus#0 has 7 tokens; only the first 3 are embedded" in (
+        capsys.readouterr().out
+    )
+
+
+def test_ingest_without_documents(isolated_env, capsys):
+    assert cli.main(["ingest"]) == 1
+    assert "no documents with text" in capsys.readouterr().err
+
+
+def test_search(pipeline, capsys):
+    cli.main(["ingest"])
+    capsys.readouterr()
+    assert cli.main(["search", "fry pancakes"]) == 0
+    out = capsys.readouterr().out
+    assert out.index("[1] Pancake") < out.index("[2] Hummus")
+
+
+def test_ask_before_ingest(pipeline, capsys):
+    assert cli.main(["ask", "pancakes?"]) == 1
+    assert "run `local-rag ingest` first" in capsys.readouterr().err
+
+
+def test_ask_answers_with_sources(pipeline, capsys, monkeypatch):
+    client = FakeOllamaClient(reply="Fry them [1].")
+    monkeypatch.setattr("ollama.Client", lambda host: client)
+    os.environ["RAG_MAX_DISTANCE"] = "0.9"
+    cli.main(["ingest"])
+    capsys.readouterr()
+
+    assert cli.main(["ask", "how do I fry pancakes"]) == 0
+
+    out = capsys.readouterr().out
+    assert out.startswith("Fry them [1].")
+    assert "Sources:\n[1] Pancake (recipes/Pancake, distance" in out
+    assert "Hummus" not in out
+    assert "Fry pancakes in butter." in client.chats[0]["messages"][1]["content"]
+
+
+def test_ask_without_relevant_chunks_skips_llm(pipeline, capsys, monkeypatch):
+    client = FakeOllamaClient()
+    monkeypatch.setattr("ollama.Client", lambda host: client)
+    os.environ["RAG_MAX_DISTANCE"] = "0.0"
+    cli.main(["ingest"])
+    capsys.readouterr()
+
+    assert cli.main(["ask", "capital of France", "--show-context"]) == 0
+
+    out = capsys.readouterr().out
+    assert "--- [1]" in out
+    assert out.rstrip().endswith("No relevant recipes found.")
+    assert client.chats == []
