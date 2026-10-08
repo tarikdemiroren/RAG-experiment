@@ -64,3 +64,13 @@ def test_relative_path_follows_current_directory(tmp_path, monkeypatch):
     VectorStore(Path("db"), "recipes").rebuild([_chunk("a", "x")], [[1.0, 0.0]])
     monkeypatch.chdir(tmp_path / "two")
     assert VectorStore(Path("db"), "recipes").count() == 0
+
+
+def test_query_all_returns_every_chunk_nearest_first(store):
+    store.rebuild([_chunk("a", "x"), _chunk("b", "y")], [[1.0, 0.0], [0.0, 1.0]])
+    assert [h.id for h in store.query_all([0.0, 1.0])] == ["b#0", "a#0"]
+
+
+def test_query_all_without_index_raises(store):
+    with pytest.raises(IndexMissingError):
+        store.query_all([1.0, 0.0])

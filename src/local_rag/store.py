@@ -21,6 +21,9 @@ class Hit:
     source: str
     text: str
     distance: float
+    keyword_score: float = 0.0
+    keyword_coverage: float = 0.0
+    score: float = 0.0
 
 
 class VectorStore:
@@ -51,10 +54,21 @@ class VectorStore:
             )
 
     def query(self, embedding: list[float], k: int) -> list[Hit]:
+        return self._query(self._collection(), embedding, k)
+
+    def query_all(self, embedding: list[float]) -> list[Hit]:
+        """Every chunk, nearest first."""
+        collection = self._collection()
+        return self._query(collection, embedding, collection.count())
+
+    def _collection(self):
         try:
-            collection = self._client.get_collection(self._name, embedding_function=None)
+            return self._client.get_collection(self._name, embedding_function=None)
         except NotFoundError:
             raise IndexMissingError("no index found; run `local-rag ingest` first") from None
+
+    @staticmethod
+    def _query(collection, embedding: list[float], k: int) -> list[Hit]:
         result = collection.query(
             query_embeddings=[embedding],
             n_results=k,

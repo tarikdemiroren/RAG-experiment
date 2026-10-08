@@ -29,9 +29,12 @@ merged and the folder name is used as the title. Settings are `RAG_*` environmen
 
 ```bash
 local-rag ingest                          # rebuild the index from resources/
-local-rag search "boiled eggs"            # show retrieved chunks and distances
+local-rag search "boiled eggs"            # show retrieved chunks and their scores
 local-rag ask "How long do I boil eggs?"  # answer with sources; --show-context to see chunks
 ```
+
+Retrieval is hybrid by default: vector similarity and BM25 keyword scores, merged with
+Reciprocal Rank Fusion. Compare with `--mode vector` or `--mode keyword`.
 
 ## Development
 

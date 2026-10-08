@@ -1,16 +1,11 @@
 from conftest import FakeOllamaClient
 
-from local_rag.answer import SYSTEM_PROMPT, build_messages, cited, relevant, stream_answer
+from local_rag.answer import SYSTEM_PROMPT, build_messages, cited, stream_answer
 from local_rag.store import Hit
 
 
 def _hit(title, distance, text=None):
     return Hit(f"{title}#0", title, title, text or f"{title}\nsteps", distance)
-
-
-def test_relevant_filters_by_distance():
-    hits = [_hit("A", 0.2), _hit("B", 0.6), _hit("C", 0.61)]
-    assert [h.title for h in relevant(hits, 0.6)] == ["A", "B"]
 
 
 def test_build_messages_numbers_context():

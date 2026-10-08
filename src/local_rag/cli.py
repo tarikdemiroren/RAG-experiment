@@ -9,12 +9,13 @@ import ollama
 from dotenv import load_dotenv
 
 from local_rag import __version__
-from local_rag.answer import NO_MATCH, cited, relevant, stream_answer
+from local_rag.answer import NO_MATCH, cited, stream_answer
 from local_rag.checks import run_checks
 from local_rag.chunking import chunk_recipe
 from local_rag.config import ConfigError, Settings, apply_env_defaults
 from local_rag.embeddings import Embedder, SentenceTransformerEmbedder
 from local_rag.loaders import load_recipes
+from local_rag.retrieval import MODES, Retriever
 from local_rag.store import Hit, IndexMissingError, VectorStore
 
 
@@ -39,8 +40,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "ingest":
             return _cmd_ingest(settings)
         if args.command == "search":
-            return _cmd_search(settings, args.query)
-        return _cmd_ask(settings, args.question, args.show_context)
+            return _cmd_search(settings, args.query, args.mode)
+        return _cmd_ask(settings, args.question, args.mode, args.show_context)
     except IndexMissingError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -59,6 +60,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ask = commands.add_parser("ask", help="answer a question from the indexed documents")
     ask.add_argument("question")
     ask.add_argument("--show-context", action="store_true", help="print the retrieved chunks")
+    for command in (search, ask):
+        command.add_argument("--mode", choices=MODES, default="hybrid", help="retrieval method")
     return parser
 
 
@@ -97,21 +100,22 @@ def _cmd_ingest(settings: Settings) -> int:
     return 0
 
 
-def _cmd_search(settings: Settings, query: str) -> int:
-    for i, hit in enumerate(_retrieve(settings, query), 1):
+def _cmd_search(settings: Settings, query: str, mode: str) -> int:
+    for i, hit in enumerate(make_retriever(settings).search(query, settings.top_k, mode), 1):
         _print_hit(i, hit)
     return 0
 
 
-def _cmd_ask(settings: Settings, question: str, show_context: bool) -> int:
-    hits = _retrieve(settings, question)
-    if show_context:
-        for i, hit in enumerate(hits, 1):
-            _print_hit(i, hit)
-    hits = relevant(hits, settings.max_distance)
+def _cmd_ask(settings: Settings, question: str, mode: str, show_context: bool) -> int:
+    hits = make_retriever(settings).search(
+        question, settings.top_k, mode, max_distance=settings.max_distance
+    )
     if not hits:
         print(NO_MATCH)
         return 0
+    if show_context:
+        for i, hit in enumerate(hits, 1):
+            _print_hit(i, hit)
 
     client = ollama.Client(host=settings.ollama_host)
     parts = []
@@ -127,13 +131,12 @@ def _cmd_ask(settings: Settings, question: str, show_context: bool) -> int:
     return 0
 
 
-def _retrieve(settings: Settings, query: str) -> list[Hit]:
-    vector = make_embedder(settings).embed([query])[0]
-    return make_store(settings).query(vector, settings.top_k)
-
-
 def _print_hit(i: int, hit: Hit) -> None:
-    print(f"--- [{i}] {hit.title}  distance={hit.distance:.3f}  id={hit.id}")
+    print(
+        f"--- [{i}] {hit.title}  id={hit.id}\n"
+        f"    distance={hit.distance:.3f}  keyword={hit.keyword_score:.2f} "
+        f"({hit.keyword_coverage:.0%} of terms)  fused={hit.score:.4f}"
+    )
     print(hit.text, end="\n\n")
 
 
@@ -143,3 +146,7 @@ def make_embedder(settings: Settings) -> Embedder:
 
 def make_store(settings: Settings) -> VectorStore:
     return VectorStore(settings.db_dir, settings.collection)
+
+
+def make_retriever(settings: Settings) -> Retriever:
+    return Retriever(make_store(settings), make_embedder(settings))

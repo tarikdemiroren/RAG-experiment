@@ -148,9 +148,7 @@ def test_ask_without_relevant_chunks_skips_llm(pipeline, capsys, monkeypatch):
 
     assert cli.main(["ask", "capital of France", "--show-context"]) == 0
 
-    out = capsys.readouterr().out
-    assert "--- [1]" in out
-    assert out.rstrip().endswith("No relevant recipes found.")
+    assert capsys.readouterr().out == "No relevant recipes found.\n"
     assert client.chats == []
 
 
@@ -179,3 +177,37 @@ def test_ask_without_citations_prints_no_sources(pipeline, capsys, monkeypatch):
     cli.main(["ask", "calories?"])
 
     assert capsys.readouterr().out == "I don't know. \n"
+
+
+def test_ask_show_context_prints_scores(pipeline, capsys, monkeypatch):
+    monkeypatch.setattr("ollama.Client", lambda host: FakeOllamaClient(reply="Fry [1]."))
+    cli.main(["ingest"])
+    capsys.readouterr()
+
+    cli.main(["ask", "fry pancakes", "--show-context"])
+
+    out = capsys.readouterr().out
+    assert out.startswith("--- [1] Pancake  id=recipes/Pancake#0\n    distance=")
+    assert "(100% of terms)" in out
+
+
+def test_ask_keyword_match_passes_distance_gate(pipeline, capsys, monkeypatch):
+    client = FakeOllamaClient(reply="Use garlic [1].")
+    monkeypatch.setattr("ollama.Client", lambda host: client)
+    os.environ["RAG_MAX_DISTANCE"] = "0.0"
+    cli.main(["ingest"])
+    capsys.readouterr()
+
+    cli.main(["ask", "garlic"])
+
+    assert capsys.readouterr().out.endswith("Sources:\n[1] Hummus\n")
+
+
+@pytest.mark.parametrize(("mode", "count"), [("vector", 2), ("keyword", 1), ("hybrid", 2)])
+def test_search_modes(pipeline, capsys, mode, count):
+    cli.main(["ingest"])
+    capsys.readouterr()
+    cli.main(["search", "lemon", "--mode", mode])
+    out = capsys.readouterr().out
+    assert out.startswith("--- [1] Hummus")
+    assert out.count("--- [") == count

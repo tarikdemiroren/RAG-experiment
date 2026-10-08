@@ -17,10 +17,6 @@ NO_MATCH = "No relevant recipes found."
 _CITATION = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
 
-def relevant(hits: list[Hit], max_distance: float) -> list[Hit]:
-    return [h for h in hits if h.distance <= max_distance]
-
-
 def build_messages(question: str, hits: list[Hit]) -> list[dict[str, str]]:
     context = "\n\n".join(f"[{i}] {hit.text}" for i, hit in enumerate(hits, 1))
     return [
